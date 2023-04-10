@@ -159,9 +159,150 @@ constraint pk_emp_depart primary key(EmployeeID, DepartmentID)
 )
 GO
 
-INSERT dbo.MDepartment(DepartmentID, Name)
-SELECT DepartmentID, Name
-FROM HumanResources.Department
+INSERT dbo.MDepartment(DepartmentID, Name, NumOfEmployee)
+VALUES(1, -- DepartmentID - int
+N'Sales' , -- Name - nvarchar(50)
+0   -- NumOfEmployee - int
+    )
+
+INSERT dbo.MDepartment(DepartmentID, Name, NumOfEmployee)
+VALUES(2, -- DepartmentID - int
+N'Engineer' , -- Name - nvarchar(50)
+0   -- NumOfEmployee - int
+    )
+
+go
+CREATE TRIGGER cau3_Trigger
+    ON dbo.MEmployees
+    FOR INSERT
+    AS
+    BEGIN
+		IF EXISTS (SELECT * FROM Inserted)
+		BEGIN
+		    DECLARE @DepartmentID INT, @CountEmps INT
+
+			SELECT @DepartmentID = DepartmentID
+			FROM Inserted
+
+			SELECT @CountEmps = COUNT(*)
+			FROM dbo.MEmployees
+			WHERE DepartmentID = @DepartmentID
+
+			IF (@CountEmps <= 200)
+			BEGIN
+			    UPDATE dbo.MDepartment
+				SET NumOfEmployee = NumOfEmployee + 1
+				WHERE DepartmentID = @DepartmentID
+			END
+			ELSE
+			BEGIN
+			    PRINT N'Bộ phận đã đủ nhân viên'
+				ROLLBACK TRANSACTION
+			END
+			
+		END
+	END
+GO
+
+SELECT * FROM dbo.MDepartment
+SELECT * FROM dbo.MEmployees
+
+INSERT INTO dbo.MEmployees(EmployeeID, FirstName, MiddleName, LastName, DepartmentID)
+VALUES(2, -- EmployeeID - int
+N'Vu' , -- FirstName - nvarchar(50)
+N'Nguyen' , -- MiddleName - nvarchar(50)
+N'Tran' , -- LastName - nvarchar(50)
+1   -- DepartmentID - int
+    )
+------------------------------------------------------------------------------------------------
+/*
+4. Bảng [Purchasing].[Vendor], chứa thông tin của nhà cung cấp, thuộc tính
+CreditRating hiển thị thông tin đánh giá mức tín dụng, có các giá trị:
+1 = Superior
+2 = Excellent
+3 = Above average
+4 = Average
+5 = Below average
+Viết một trigger nhằm đảm bảo khi chèn thêm một record mới vào bảng
+[Purchasing].[PurchaseOrderHeader], nếu Vender có CreditRating=5 thì hiển thị
+thông báo không cho phép chèn và đồng thời hủy giao tác.
+*/
+go
+CREATE TRIGGER cau4_Trigger
+    ON Purchasing.PurchaseOrderHeader
+    FOR INSERT
+    AS
+    BEGIN
+		IF EXISTS (SELECT * FROM Inserted)
+		BEGIN
+		    DECLARE @VendorID INT, @CreditRating INT
+			SELECT @VendorID = VendorID
+			FROM Inserted
+
+			SELECT @CreditRating = CreditRating
+			FROM Purchasing.Vendor
+			WHERE BusinessEntityID = @VendorID
+
+			IF (@CreditRating = 5)
+			BEGIN
+			    PRINT N'CreditRating của Vendor này đã bằng 5'
+				ROLLBACK TRANSACTION
+			END
+		END			
+	END
+go
+
+INSERT INTO Purchasing.PurchaseOrderHeader (RevisionNumber, Status,
+EmployeeID, VendorID, ShipMethodID, OrderDate, ShipDate, SubTotal, TaxAmt,
+Freight) VALUES ( 2 ,3, 261, 1652, 4 ,GETDATE() ,GETDATE() , 44594.55, 3567.564, 1114.8638 );
+
+------------------------------------------------------------------------------------------------
+/*
+5. Viết một trigger thực hiện trên bảng ProductInventory (lưu thông tin số lượng sản phẩm trong kho).
+Khi chèn thêm một đơn đặt hàng vào bảng SalesOrderDetail với số lượng xác định trong field OrderQty, 
+nếu số lượng trong kho Quantity> OrderQty thì cập nhật lại số lượng trong kho Quantity= Quantity- OrderQty,
+ngược lại nếu Quantity=0 thì xuất thông báo “Kho hết hàng” và đồng thời hủy giao tác
+*/
+go
+CREATE TRIGGER cau5_Trigger
+    ON Sales.SalesOrderDetail
+    FOR INSERT
+    AS
+    BEGIN
+		DECLARE @ProductID INT, @OrderQty INT, @Quantity INT, @LocationID INT
+
+		SELECT @ProductID = ProductID, @Quantity = OrderQty
+		FROM Inserted
+
+		SELECT TOP 1 @Quantity = Quantity, @LocationID = LocationID
+		FROM Production.ProductInventory
+		WHERE ProductID = @ProductID
+		ORDER BY Quantity DESC
+
+		IF (@Quantity > @OrderQty)
+		BEGIN
+		    UPDATE Production.ProductInventory
+			SET Quantity = Quantity - @OrderQty
+			WHERE ProductID = ProductID AND LocationID = @LocationID
+		END
+		ELSE
+		BEGIN
+		    PRINT 'Kho hết hàng'
+			ROLLBACK TRANSACTION
+		END
+	END
+GO
+
+SELECT * FROM Sales.SalesOrderDetail
+SELECT * FROM Production.ProductInventory WHERE ProductID = 776
+
+INSERT Sales.SalesOrderDetail(SalesOrderID, CarrierTrackingNumber, OrderQty, ProductID, SpecialOfferID, UnitPrice)
+VALUES(43659, -- SalesOrderID - int
+N'4911-403C-98' , -- CarrierTrackingNumber - nvarchar(25)
+50   , -- OrderQty - smallint
+776   , -- ProductID - int
+1   , -- SpecialOfferID - int
+300, -- UnitPrice - money)
 ------------------------------------------------------------------------------------------------
 /*
 6. Tạo trigger cập nhật tiền thưởng (Bonus) cho nhân viên bán hàng SalesPerson, khi
